@@ -1,15 +1,17 @@
 @echo off
-REM =============================================================
-REM INSTALADOR AUTOMÁTICO - Detector de Movimiento + YOLOv8
-REM Compatible con: Windows 10/11
-REM =============================================================
+setlocal enabledelayedexpansion
+
+set ROOT_DIR=%~dp0
+set MODEL_DIR=%ROOT_DIR%yolo_model
+set MODEL_PT_PATH=%MODEL_DIR%\yolov8n.pt
+set MODEL_ONNX_PATH=%MODEL_DIR%\yolov8n.onnx
+set COCO_PATH=%MODEL_DIR%\coco.names
 
 echo =============================================================
 echo    INSTALADOR - Detector de Movimiento + YOLOv8
 echo =============================================================
 echo.
 
-REM Verificar Python
 python --version >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] Python no encontrado. Instala Python 3.8+ desde python.org
@@ -17,79 +19,74 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [INFO] Python encontrado
-python --version
-
-REM Detectar GPU NVIDIA
-set GPU_TYPE=CPU
 set ONNX_PACKAGE=onnxruntime
-
 nvidia-smi >nul 2>&1
-if not errorlevel 1 (
-    echo [INFO] GPU NVIDIA detectada
-    set GPU_TYPE=NVIDIA
-    set ONNX_PACKAGE=onnxruntime-gpu
-) else (
-    echo [WARN] No se detectó GPU NVIDIA. Se usará CPU.
-)
+if not errorlevel 1 set ONNX_PACKAGE=onnxruntime-gpu
 
-echo.
-echo =============================================================
-echo    GPU: %GPU_TYPE%
-echo    ONNX Runtime: %ONNX_PACKAGE%
-echo =============================================================
-echo.
-
-REM Crear entorno virtual
-set /p CREATE_VENV="Crear entorno virtual? (S/n): "
+set /p CREATE_VENV=Crear entorno virtual? (S/n): 
 if /i "%CREATE_VENV%"=="" set CREATE_VENV=S
-
 if /i "%CREATE_VENV%"=="S" (
-    echo [INFO] Creando entorno virtual...
-    python -m venv venv
-    call venv\Scripts\activate.bat
-    echo [INFO] Entorno virtual activado
+    python -m venv "%ROOT_DIR%venv"
+    call "%ROOT_DIR%venv\Scripts\activate.bat"
 )
 
-REM Instalar dependencias
 echo [INFO] Instalando dependencias...
 pip install --upgrade pip --quiet
-pip install opencv-python numpy --quiet
-echo [INFO] OpenCV y NumPy instalados
+pip install -r "%ROOT_DIR%requirements.txt" --quiet
+pip install %ONNX_PACKAGE% ultralytics --quiet
 
-echo [INFO] Instalando %ONNX_PACKAGE%...
-pip install %ONNX_PACKAGE% --quiet
+if not exist "%MODEL_DIR%" mkdir "%MODEL_DIR%"
 
-REM Descargar modelo
-echo [INFO] Descargando modelo YOLOv8...
-pip install ultralytics --quiet
+set URL1=https://github.com/ultralytics/assets/releases/download/v8.4.0/yolov8n.pt
+set URL2=https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n.pt
+set URL3=https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8n.pt
+if not "%YOLO_MODEL_URL%"=="" (
+    set URL1=%YOLO_MODEL_URL%
+    set URL2=
+    set URL3=
+)
 
-if not exist yolo_model mkdir yolo_model
+set DOWNLOAD_OK=0
+for %%U in ("!URL1!" "!URL2!" "!URL3!") do (
+    if not "%%~U"=="" (
+        echo [INFO] Descargando: %%~U
+        curl -fL -o "%MODEL_PT_PATH%" "%%~U" >nul 2>&1
+        if not errorlevel 1 (
+            set DOWNLOAD_OK=1
+            goto :pt_downloaded
+        )
+    )
+)
 
-python -c "from ultralytics import YOLO; import shutil, os; model = YOLO('yolov8n.pt'); model.export(format='onnx', imgsz=640, simplify=True); shutil.move('yolov8n.onnx', 'yolo_model/yolov8n.onnx') if os.path.exists('yolov8n.onnx') else None; os.remove('yolov8n.pt') if os.path.exists('yolov8n.pt') else None"
+:pt_downloaded
+if "%DOWNLOAD_OK%"=="0" (
+    echo [ERROR] No se pudo descargar yolov8n.pt
+    pause
+    exit /b 1
+)
 
-REM Descargar etiquetas
-echo [INFO] Descargando etiquetas COCO...
-curl -sL -o yolo_model\coco.names https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
+echo [INFO] Convirtiendo yolov8n.pt a ONNX en yolo_model...
+python -c "from ultralytics import YOLO; from pathlib import Path; pt=Path(r'%MODEL_PT_PATH%'); YOLO(str(pt)).export(format='onnx', imgsz=640, simplify=True); root=Path('yolov8n.onnx'); root.replace(Path(r'%MODEL_ONNX_PATH%')) if root.exists() else None"
+if errorlevel 1 (
+    echo [ERROR] Fallo conversion a ONNX
+    pause
+    exit /b 1
+)
 
-REM Verificar
-echo.
-echo [INFO] Verificando instalación...
-python -c "import cv2, numpy, onnxruntime; print('OpenCV:', cv2.__version__); print('NumPy:', numpy.__version__); print('ONNX Runtime:', onnxruntime.__version__); print('Providers:', onnxruntime.get_available_providers())"
+curl -fL -o "%COCO_PATH%" https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] No se pudo descargar coco.names
+    pause
+    exit /b 1
+)
 
-echo.
-echo =============================================================
-echo    INSTALACION COMPLETADA!
-echo =============================================================
-echo.
-echo Para ejecutar:
-
-if /i "%CREATE_VENV%"=="S" (
-    echo   1. Activar entorno: venv\Scripts\activate
-    echo   2. Ejecutar: python detector_movimiento_yolo.py
-) else (
-    echo   python detector_movimiento_yolo.py
+python -c "import os, cv2, numpy, onnxruntime; print('OpenCV',cv2.__version__); print('NumPy',numpy.__version__); print('ONNX Runtime',onnxruntime.__version__); assert os.path.exists(r'%MODEL_PT_PATH%'); assert os.path.exists(r'%MODEL_ONNX_PATH%'); assert os.path.exists(r'%COCO_PATH%'); print('Modelo PT+ONNX y etiquetas OK')"
+if errorlevel 1 (
+    echo [ERROR] Verificacion final fallo
+    pause
+    exit /b 1
 )
 
 echo.
+echo Instalacion completada. Ejecuta: python main.py
 pause

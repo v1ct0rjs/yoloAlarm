@@ -1,9 +1,6 @@
-# Dependencias base
+# Dependencias base (ligeras)
 opencv-python>=4.8.0
 numpy>=1.24.0
 
-# ONNX Runtime (se instala la versión correcta según GPU)
+# ONNX Runtime se instala dinámicamente en install.sh/install.bat
 # onnxruntime o onnxruntime-gpu
-
-# Para descargar el modelo (solo una vez)
-ultralytics>=8.0.0

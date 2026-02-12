@@ -22,15 +22,33 @@ Sistema de detección de movimiento e identificación de objetos (personas, perr
 
 ```bash
 # Dar permisos y ejecutar
-chmod +x instalar.sh
-./instalar.sh
+chmod +x install.sh
+./install.sh
 ```
 
 ### Windows
 
 ```batch
-# Doble clic en instalar.bat o ejecutar en CMD:
-instalar.bat
+# Doble clic en install.bat o ejecutar en CMD:
+install.bat
+```
+
+> El instalador descarga `yolov8n.pt` desde releases oficiales de Ultralytics y lo guarda en `yolo_model/`.
+> Para evitar errores de espacio en disco, por defecto **no instala ultralytics** ni convierte localmente: descarga un ONNX preexportado para ejecutar inmediatamente.
+> Si quieres forzar conversión local PT→ONNX (más pesado), usa `EXPORT_WITH_ULTRALYTICS=1`.
+
+
+### Variables opcionales de instalación
+
+```bash
+# URL del peso YOLOv8 (.pt)
+YOLO_PT_URL=<url> ./install.sh
+
+# URL del ONNX preexportado
+YOLO_ONNX_URL=<url> ./install.sh
+
+# Forzar conversión local PT->ONNX (requiere más espacio en disco)
+EXPORT_WITH_ULTRALYTICS=1 ./install.sh
 ```
 
 ## Archivos del Proyecto
@@ -61,7 +79,7 @@ venv\Scripts\activate
 
 ### 2. Configurar fuente de video
 
-Edita `detector_movimiento_yolo.py` y cambia la variable `URL`:
+Edita `main.py` y cambia la variable `URL`:
 
 ```python
 # Para archivo local:
@@ -77,7 +95,7 @@ URL = 0  # o 1 si tienes múltiples cámaras
 ### 3. Ejecutar
 
 ```bash
-python detector_movimiento_yolo.py
+python main.py
 ```
 
 ## Controles

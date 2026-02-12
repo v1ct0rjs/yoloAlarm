@@ -1,27 +1,29 @@
 # Detector de Movimiento + YOLOv8
 
-Sistema de detección de movimiento e identificación de objetos (personas, perros, gatos) usando YOLOv8 con soporte para GPU.
+Sistema de detección de movimiento e identificación de objetos (personas, perros, gatos) usando YOLOv8 con soporte para GPU y alertas por Telegram/Email.
 
 ## Características
 
--  **Detección de movimiento** en tiempo real
--  **YOLOv8** para identificar personas, perros y gatos
--  **Soporte GPU** automático (NVIDIA CUDA)
--  **Optimizado** para video en tiempo real y streaming
-- ️ **Controles en tiempo real** para ajustar sensibilidad
+- Detección de movimiento en tiempo real
+- YOLOv8 para identificar personas, perros y gatos
+- Soporte GPU automático (NVIDIA CUDA)
+- Alertas por Telegram con foto
+- Alertas por Email con foto adjunta
+- Horarios programables para activar/desactivar alarma
+- Bot de Telegram para control remoto
+- Optimizado para video en tiempo real y streaming
 
 ## Requisitos
 
-- **Python** 3.8 o superior
-- **Sistema operativo:** Windows 10/11, Linux (cualquier distro), macOS
-- **GPU (opcional):** NVIDIA con CUDA para aceleración
+- Python 3.8 o superior
+- Sistema operativo: Windows 10/11, Linux, macOS
+- GPU (opcional): NVIDIA con CUDA para aceleración
 
-## Instalación Rápida
+## Instalación
 
 ### Linux / macOS
 
 ```bash
-# Dar permisos y ejecutar
 chmod +x instalar.sh
 ./instalar.sh
 ```
@@ -29,82 +31,149 @@ chmod +x instalar.sh
 ### Windows
 
 ```batch
-# Doble clic en instalar.bat o ejecutar en CMD:
 instalar.bat
+```
+
+## Configuración de Telegram
+
+### 1. Crear el bot
+
+1. Abre Telegram y busca `@BotFather`
+2. Envía `/newbot`
+3. Sigue las instrucciones (nombre y username)
+4. Copia el token que te da
+
+### 2. Obtener tu Chat ID
+
+1. Añade el token en tu archivo `.env`
+2. Envía `/start` a tu nuevo bot en Telegram
+3. Ejecuta:
+```bash
+python obtener_chat_id.py
+```
+4. Copia el Chat ID que aparece
+
+### 3. Configurar .env
+
+```bash
+cp .env.ejemplo .env
+```
+
+Edita el archivo con tus datos:
+
+```env
+TELEGRAM_TOKEN="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+TELEGRAM_CHAT_ID="123456789"
+```
+
+## Comandos del Bot
+
+| Comando | Descripción |
+|---------|-------------|
+| `/activar` | Activar alarma (forzado) |
+| `/desactivar` | Desactivar alarma (forzado) |
+| `/auto` | Modo automático (usa horario) |
+| `/estado` | Ver estado actual |
+| `/horario` | Ver horario configurado |
+| `/sethorario HH:MM HH:MM` | Cambiar horario |
+| `/setdias 1,2,3,4,5` | Cambiar días activos |
+| `/foto` | Obtener captura actual |
+| `/help` | Ver comandos |
+
+### Ejemplos de configuración por Telegram
+
+```
+/sethorario 08:00 22:00      → Alertas de 8:00 a 22:00
+/sethorario 22:00 06:00      → Horario nocturno
+/setdias 1,2,3,4,5           → Lunes a Viernes
+/setdias 6,7                 → Solo fines de semana
+```
+
+Los días son: 1=Lun, 2=Mar, 3=Mié, 4=Jue, 5=Vie, 6=Sáb, 7=Dom
+
+## Configuración de Horarios
+
+En el archivo `.env`:
+
+```env
+HORARIO_INICIO="08:00"
+HORARIO_FIN="22:00"
+DIAS_ACTIVOS="1,2,3,4,5,6,7"
+```
+
+Dejar vacío `HORARIO_INICIO` y `HORARIO_FIN` para alertas 24/7.
+
+## Configuración de Email (Opcional)
+
+1. Activa verificación en 2 pasos en Gmail
+2. Crea una contraseña de aplicación en https://myaccount.google.com/apppasswords
+3. Configura en `.env`:
+
+```env
+GMAIL_CUENTA="tu_correo@gmail.com"
+GMAIL_PASSWORD="xxxx xxxx xxxx xxxx"
 ```
 
 ## Archivos del Proyecto
 
 ```
 proyecto/
-├── main.py  # Programa principal
-├── install.sh                  # Instalador Linux/macOS
-├── install.bat                 # Instalador Windows
+├── detector_movimiento_yolo.py  # Programa principal
+├── obtener_chat_id.py           # Utilidad para Telegram
+├── instalar.sh                  # Instalador Linux/macOS
+├── instalar.bat                 # Instalador Windows
 ├── requirements.txt             # Dependencias
-├── README.md                    # Este archivo
+├── .env.ejemplo                 # Plantilla de configuración
+├── .env                         # Tu configuración (crear)
 └── yolo_model/                  # (creado automáticamente)
-    ├── yolov8n.onnx            # Modelo YOLOv8
-    └── coco.names              # Etiquetas de clases
+    ├── yolov8n.onnx
+    └── coco.names
 ```
 
 ## Uso
 
-### 1. Activar entorno virtual (si lo creaste)
-
-```bash
-# Linux/macOS
-source venv/bin/activate
-
-# Windows
-venv\Scripts\activate
-```
-
-### 2. Configurar fuente de video
+### Configurar fuente de video
 
 Edita `detector_movimiento_yolo.py` y cambia la variable `URL`:
 
 ```python
-# Para archivo local:
+# Archivo local:
 URL = "mi_video.mp4"
 
-# Para streaming:
+# Streaming:
 URL = "https://url-del-streaming/video"
 
-# Para webcam:
-URL = 0  # o 1 si tienes múltiples cámaras
+# Webcam:
+URL = 0
 ```
 
-### 3. Ejecutar
+### Ejecutar
 
 ```bash
 python detector_movimiento_yolo.py
 ```
 
-## Controles
+## Controles de Teclado
 
 | Tecla | Acción |
 |-------|--------|
 | `ESC` | Salir |
 | `P` | Pausar / Reanudar |
 | `R` | Reiniciar video |
-| `S` | Subir sensibilidad YOLO |
-| `W` | Bajar sensibilidad YOLO |
-| `A` | Subir sensibilidad movimiento |
-| `D` | Bajar sensibilidad movimiento |
-| `Q` | YOLO más frecuente |
-| `E` | YOLO menos frecuente |
+| `S/W` | Ajustar sensibilidad YOLO |
+| `A/D` | Ajustar sensibilidad movimiento |
+| `Q/E` | Ajustar frecuencia YOLO |
+| `M` | Ciclar alarma: ON → OFF → AUTO |
 
-## Colores de Detección
+## Detecciones
 
-| Objeto | Color |
-|--------|-------|
-| 🟢 Persona | Verde |
-| 🟠 Perro | Naranja |
-| 🟣 Gato | Magenta |
+| Objeto | Color en pantalla |
+|--------|-------------------|
+| Persona | Verde |
+| Perro | Naranja |
+| Gato | Magenta |
 
-## Configuración Avanzada
-
-### Añadir más clases de detección
+## Añadir más clases
 
 Edita el diccionario `CLASES_DETECTAR` en el código:
 
@@ -113,14 +182,13 @@ CLASES_DETECTAR = {
     "person": {"nombre": "PERSONA", "color": (0, 255, 0)},
     "dog": {"nombre": "PERRO", "color": (0, 165, 255)},
     "cat": {"nombre": "GATO", "color": (255, 0, 255)},
-    "car": {"nombre": "COCHE", "color": (255, 0, 0)},  # Añadir
+    "car": {"nombre": "COCHE", "color": (255, 0, 0)},
 }
 
-# Y añadir el ID en IDS_DETECTAR (ver lista COCO)
 IDS_DETECTAR = {0: "person", 15: "cat", 16: "dog", 2: "car"}
 ```
 
-### IDs de clases COCO comunes
+### IDs de clases COCO
 
 | ID | Clase | ID | Clase |
 |----|-------|----|-------|
@@ -132,39 +200,36 @@ IDS_DETECTAR = {0: "person", 15: "cat", 16: "dog", 2: "car"}
 
 ## Solución de Problemas
 
-### "No se detectó GPU"
+**No se detectó GPU**
+```bash
+nvidia-smi                              # Verificar drivers
+pip install onnxruntime-gpu --force     # Reinstalar
+```
 
-1. Verifica que tienes drivers NVIDIA: `nvidia-smi`
-2. Reinstala onnxruntime-gpu: `pip install onnxruntime-gpu --force-reinstall`
-
-### "No module named cv2"
-
+**No module named cv2**
 ```bash
 pip install opencv-python
 ```
 
-### "No module named onnxruntime"
-
+**No module named onnxruntime**
 ```bash
-# Con GPU NVIDIA:
-pip install onnxruntime-gpu
-
-# Sin GPU:
-pip install onnxruntime
+pip install onnxruntime-gpu    # Con GPU
+pip install onnxruntime        # Sin GPU
 ```
 
-### Video entrecortado
+**Video entrecortado**: Aumenta el intervalo de YOLO con la tecla `E`.
 
-- Aumenta el intervalo de YOLO con la tecla `E`
-- O usa un modelo más pequeño
+## Rendimiento
 
-## Rendimiento Esperado
-
-| Hardware | Tiempo/frame | FPS YOLO |
-|----------|-------------|----------|
+| Hardware | Tiempo/frame | FPS |
+|----------|-------------|-----|
 | CPU (i7) | ~80ms | ~12 |
-| GPU (GTX 1060) | ~15ms | ~66 |
-| GPU (RTX 3090) | ~5ms | ~200 |
+| GTX 1060 | ~15ms | ~66 |
+| RTX 3090 | ~5ms | ~200 |
+
+## Licencia
+
+GNU GPLv3
 
 ## Créditos
 

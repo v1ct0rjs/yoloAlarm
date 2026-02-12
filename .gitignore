@@ -28,3 +28,5 @@ yolo_model/
 
 # Misc
 .DS_Store
+.env
+

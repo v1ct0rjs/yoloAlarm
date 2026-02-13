@@ -26,7 +26,6 @@ coverage.xml
 # Modelos (YOLO)
 yolo_model/
 
-# Misc
 .DS_Store
 .env
 .env.*

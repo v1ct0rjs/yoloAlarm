@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Script para obtener tu Chat ID de Telegram
-Ejecuta después de crear tu bot y enviarle /start
+Script para obtener el Chat ID de Telegram
+Ejecuta después de crear el bot y enviar /start
 """
 
 import os

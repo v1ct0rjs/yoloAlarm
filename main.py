@@ -11,6 +11,7 @@ import threading
 from dotenv import load_dotenv
 import requests
 import io
+import time
 
 # Cargar variables de entorno
 load_dotenv()
@@ -35,6 +36,7 @@ if ALERTA_EMAIL_ACTIVADA and (not GMAIL_CUENTA or not GMAIL_PASSWORD):
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 ALERTA_TELEGRAM_ACTIVADA = bool(TELEGRAM_TOKEN and TELEGRAM_CHAT_ID)
+TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}" if TELEGRAM_TOKEN else ""
 
 if not ALERTA_TELEGRAM_ACTIVADA:
     print(" Telegram no configurado - alertas por Telegram desactivadas")
@@ -97,6 +99,19 @@ ultima_alerta = None
 alerta_en_proceso = False
 
 
+def resumen_objetos(objetos_detectados, prefijo="• "):
+    """Devuelve un texto con objetos detectados para mensajes."""
+    return "\n".join(f"{prefijo}{nombre}: {cantidad}" for nombre, cantidad in objetos_detectados.items())
+
+
+def color_por_nombre(nombre):
+    """Obtiene el color configurado para un nombre visible (PERSONA/GATO/PERRO)."""
+    for info in CLASES_DETECTAR.values():
+        if info["nombre"] == nombre:
+            return info["color"]
+    return (200, 200, 200)
+
+
 def enviar_alerta_email(frame, objetos_detectados):
     """Envía alerta por email con imagen adjunta"""
     global alerta_en_proceso
@@ -130,8 +145,7 @@ def enviar_alerta_email(frame, objetos_detectados):
         👁️ Objetos detectados:
         """
 
-        for nombre, cantidad in objetos_detectados.items():
-            cuerpo += f"\n        • {nombre}: {cantidad}"
+        cuerpo += "\n        " + resumen_objetos(objetos_detectados, prefijo="• ")
 
         cuerpo += """
 
@@ -213,6 +227,37 @@ def enviar_alertas(frame, objetos_detectados):
 # FUNCIONES DE TELEGRAM
 # =====================================================
 
+def telegram_post(endpoint, data, files=None):
+    """Envía una petición a la API de Telegram."""
+    if not ALERTA_TELEGRAM_ACTIVADA:
+        return None
+    url = f"{TELEGRAM_API}/{endpoint}"
+    try:
+        return requests.post(url, data=data, files=files, timeout=15)
+    except Exception:
+        return None
+
+
+def telegram_send_message(mensaje):
+    """Envía un mensaje de texto por Telegram."""
+    response = telegram_post("sendMessage", {
+        'chat_id': TELEGRAM_CHAT_ID,
+        'text': mensaje,
+        'parse_mode': 'Markdown'
+    })
+    return bool(response and response.status_code == 200)
+
+
+def telegram_send_photo(img_bytes, caption):
+    """Envía una foto por Telegram."""
+    response = telegram_post("sendPhoto", {
+        'chat_id': TELEGRAM_CHAT_ID,
+        'caption': caption,
+        'parse_mode': 'Markdown'
+    }, files={'photo': img_bytes})
+    return bool(response and response.status_code == 200)
+
+
 def verificar_alarma_activa():
     """Verifica si la alarma debe estar activa según horario y estado"""
     global ALARMA_FORZADA
@@ -260,24 +305,13 @@ def enviar_alerta_telegram(frame, objetos_detectados):
         mensaje += f"Fecha: {datetime.now().strftime('%d/%m/%Y')}\n"
         mensaje += f"Hora: {datetime.now().strftime('%H:%M:%S')}\n\n"
         mensaje += "👁️ *Detectado:*\n"
-
-        for nombre, cantidad in objetos_detectados.items():
-            mensaje += f"  • {nombre}: {cantidad}\n"
+        mensaje += resumen_objetos(objetos_detectados, prefijo="  • ") + "\n"
 
         # Enviar foto con caption
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
-        response = requests.post(url, data={
-            'chat_id': TELEGRAM_CHAT_ID,
-            'caption': mensaje,
-            'parse_mode': 'Markdown'
-        }, files={
-            'photo': img_bytes
-        })
-
-        if response.status_code == 200:
+        if telegram_send_photo(img_bytes, mensaje):
             print("Alerta enviada por Telegram")
         else:
-            print(f"[ERROR] Error Telegram: {response.text}")
+            print("[ERROR] Error Telegram")
 
     except Exception as e:
         print(f"[ERROR] Error enviando Telegram: {e}")
@@ -285,18 +319,7 @@ def enviar_alerta_telegram(frame, objetos_detectados):
 
 def enviar_mensaje_telegram(mensaje):
     """Envía un mensaje de texto por Telegram"""
-    if not ALERTA_TELEGRAM_ACTIVADA:
-        return False
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        response = requests.post(url, data={
-            'chat_id': TELEGRAM_CHAT_ID,
-            'text': mensaje,
-            'parse_mode': 'Markdown'
-        })
-        return response.status_code == 200
-    except:
-        return False
+    return telegram_send_message(mensaje)
 
 
 def iniciar_bot_telegram():
@@ -308,7 +331,111 @@ def iniciar_bot_telegram():
         global ALARMA_FORZADA, COOLDOWN_ALERTAS, HORARIO_INICIO, HORARIO_FIN, DIAS_ACTIVOS_LIST, SOLICITAR_FOTO
 
         last_update_id = 0
-        url_base = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
+        url_base = TELEGRAM_API
+
+        def set_global(nombre, valor):
+            globals()[nombre] = valor
+
+        def dias_texto():
+            nombres_dias = {1: "Lun", 2: "Mar", 3: "Mie", 4: "Jue", 5: "Vie", 6: "Sab", 7: "Dom"}
+            return ", ".join([nombres_dias[d] for d in sorted(DIAS_ACTIVOS_LIST)])
+
+        def enviar_estado():
+            if ALARMA_FORZADA is True:
+                estado = "ACTIVADA (forzada)"
+            elif ALARMA_FORZADA is False:
+                estado = "DESACTIVADA (forzada)"
+            else:
+                activa = verificar_alarma_activa()
+                estado = f"AUTO ({'activa' if activa else 'inactiva'} ahora)"
+
+            msg = f"*Estado del sistema*\n\n"
+            msg += f"Alarma: {estado}\n"
+            msg += f"Cooldown: {COOLDOWN_ALERTAS}s\n"
+            if HORARIO_INICIO and HORARIO_FIN:
+                msg += f"Horario: {HORARIO_INICIO} - {HORARIO_FIN}\n"
+            msg += f"Días: {DIAS_ACTIVOS}"
+            enviar_mensaje_telegram(msg)
+
+        def enviar_horario():
+            if HORARIO_INICIO and HORARIO_FIN:
+                msg = f"*Horario configurado*\n\n"
+                msg += f"Inicio: {HORARIO_INICIO}\n"
+                msg += f"Fin: {HORARIO_FIN}\n"
+                msg += f"Dias: {dias_texto()}\n\n"
+                msg += "Comandos:\n/sethorario HH:MM HH:MM\n/setdias 1,2,3,4,5"
+            else:
+                msg = "*Sin horario configurado*\n\nAlertas activas 24/7\n\n"
+                msg += f"Dias: {dias_texto()}\n\n"
+                msg += "Comandos:\n/sethorario HH:MM HH:MM\n/setdias 1,2,3,4,5"
+            enviar_mensaje_telegram(msg)
+
+        def enviar_ayuda():
+            msg = "*Sistema de Vigilancia YOLOv8*\n\n"
+            msg += "*Comandos:*\n"
+            msg += "/activar - Activar alarma\n"
+            msg += "/desactivar - Desactivar alarma\n"
+            msg += "/auto - Modo automatico (horario)\n"
+            msg += "/estado - Ver estado actual\n"
+            msg += "/horario - Ver horario configurado\n"
+            msg += "/sethorario HH:MM HH:MM - Cambiar horario\n"
+            msg += "/setdias 1,2,3,4,5 - Cambiar dias\n"
+            msg += "/foto - Obtener captura actual"
+            enviar_mensaje_telegram(msg)
+
+        def manejar_sethorario(text):
+            partes = text.split()
+            if len(partes) == 3:
+                try:
+                    # Validar formato
+                    datetime.strptime(partes[1], "%H:%M")
+                    datetime.strptime(partes[2], "%H:%M")
+                    HORARIO_INICIO = partes[1]
+                    HORARIO_FIN = partes[2]
+                    enviar_mensaje_telegram(
+                        f"*Horario actualizado*\n\nInicio: {HORARIO_INICIO}\nFin: {HORARIO_FIN}")
+                except ValueError:
+                    enviar_mensaje_telegram(
+                        "Formato incorrecto. Usa: /sethorario HH:MM HH:MM\n\nEjemplo: /sethorario 08:00 22:00")
+            else:
+                enviar_mensaje_telegram(
+                    "Uso: /sethorario HH:MM HH:MM\n\nEjemplo: /sethorario 08:00 22:00\nPara horario nocturno: /sethorario 22:00 06:00")
+
+        def manejar_setdias(text):
+            partes = text.split()
+            if len(partes) == 2:
+                try:
+                    dias = [int(d.strip()) for d in partes[1].split(",")]
+                    # Validar que son dias validos (1-7)
+                    if all(1 <= d <= 7 for d in dias):
+                        DIAS_ACTIVOS_LIST = dias
+                        nombres_dias = {1: "Lun", 2: "Mar", 3: "Mie", 4: "Jue", 5: "Vie", 6: "Sab",
+                                        7: "Dom"}
+                        dias_texto_local = ", ".join([nombres_dias[d] for d in sorted(dias)])
+                        enviar_mensaje_telegram(f"*Dias actualizados*\n\nActivos: {dias_texto_local}")
+                    else:
+                        enviar_mensaje_telegram(
+                            "Los dias deben ser numeros del 1 al 7\n\n1=Lunes, 7=Domingo")
+                except ValueError:
+                    enviar_mensaje_telegram(
+                        "Formato incorrecto. Usa numeros separados por comas.\n\nEjemplo: /setdias 1,2,3,4,5")
+            else:
+                enviar_mensaje_telegram(
+                    "Uso: /setdias 1,2,3,4,5\n\n1=Lunes, 2=Martes, 3=Miercoles\n4=Jueves, 5=Viernes, 6=Sabado, 7=Domingo\n\nEjemplos:\n/setdias 1,2,3,4,5 (Lun-Vie)\n/setdias 6,7 (fines de semana)\n/setdias 1,2,3,4,5,6,7 (todos)")
+
+        comandos = {
+            '/activar': lambda: (set_global("ALARMA_FORZADA", True),
+                                 enviar_mensaje_telegram("*Alarma ACTIVADA*\n\nRecibirás alertas cuando se detecte una persona.")),
+            '/desactivar': lambda: (set_global("ALARMA_FORZADA", False),
+                                    enviar_mensaje_telegram("*Alarma DESACTIVADA*\n\nNo recibirás alertas hasta que la actives.")),
+            '/auto': lambda: (set_global("ALARMA_FORZADA", None),
+                              enviar_mensaje_telegram("*Modo AUTOMÁTICO*\n\nLa alarma seguirá el horario configurado.")),
+            '/estado': enviar_estado,
+            '/horario': enviar_horario,
+            '/foto': lambda: (enviar_mensaje_telegram("Capturando..."), set_global("SOLICITAR_FOTO", True)),
+            '/start': enviar_ayuda,
+            '/help': enviar_ayuda
+        }
 
         # Enviar mensaje de inicio
         enviar_mensaje_telegram(
@@ -342,114 +469,17 @@ def iniciar_bot_telegram():
 
                     text = message.get('text', '').lower().strip()
 
-                    if text == '/activar':
-                        ALARMA_FORZADA = True
-                        enviar_mensaje_telegram("*Alarma ACTIVADA*\n\nRecibirás alertas cuando se detecte una persona.")
-
-                    elif text == '/desactivar':
-                        ALARMA_FORZADA = False
-                        enviar_mensaje_telegram("*Alarma DESACTIVADA*\n\nNo recibirás alertas hasta que la actives.")
-
-                    elif text == '/auto':
-                        ALARMA_FORZADA = None
-                        enviar_mensaje_telegram("*Modo AUTOMÁTICO*\n\nLa alarma seguirá el horario configurado.")
-
-                    elif text == '/estado':
-                        if ALARMA_FORZADA is True:
-                            estado = "ACTIVADA (forzada)"
-                        elif ALARMA_FORZADA is False:
-                            estado = "DESACTIVADA (forzada)"
-                        else:
-                            activa = verificar_alarma_activa()
-                            estado = f"AUTO ({'activa' if activa else 'inactiva'} ahora)"
-
-                        msg = f"*Estado del sistema*\n\n"
-                        msg += f"Alarma: {estado}\n"
-                        msg += f"Cooldown: {COOLDOWN_ALERTAS}s\n"
-                        if HORARIO_INICIO and HORARIO_FIN:
-                            msg += f"Horario: {HORARIO_INICIO} - {HORARIO_FIN}\n"
-                        msg += f"Días: {DIAS_ACTIVOS}"
-                        enviar_mensaje_telegram(msg)
-
-                    elif text == '/horario':
-                        nombres_dias = {1: "Lun", 2: "Mar", 3: "Mie", 4: "Jue", 5: "Vie", 6: "Sab", 7: "Dom"}
-                        dias_texto = ", ".join([nombres_dias[d] for d in sorted(DIAS_ACTIVOS_LIST)])
-                        if HORARIO_INICIO and HORARIO_FIN:
-                            msg = f"*Horario configurado*\n\n"
-                            msg += f"Inicio: {HORARIO_INICIO}\n"
-                            msg += f"Fin: {HORARIO_FIN}\n"
-                            msg += f"Dias: {dias_texto}\n\n"
-                            msg += "Comandos:\n/sethorario HH:MM HH:MM\n/setdias 1,2,3,4,5"
-                        else:
-                            msg = "*Sin horario configurado*\n\nAlertas activas 24/7\n\n"
-                            msg += f"Dias: {dias_texto}\n\n"
-                            msg += "Comandos:\n/sethorario HH:MM HH:MM\n/setdias 1,2,3,4,5"
-                        enviar_mensaje_telegram(msg)
-
-                    elif text == '/foto':
-                        enviar_mensaje_telegram("Capturando...")
-                        # La foto se enviará desde el loop principal
-                        global SOLICITAR_FOTO
-                        SOLICITAR_FOTO = True
-
-                    elif text == '/start' or text == '/help':
-                        msg = "*Sistema de Vigilancia YOLOv8*\n\n"
-                        msg += "*Comandos:*\n"
-                        msg += "/activar - Activar alarma\n"
-                        msg += "/desactivar - Desactivar alarma\n"
-                        msg += "/auto - Modo automatico (horario)\n"
-                        msg += "/estado - Ver estado actual\n"
-                        msg += "/horario - Ver horario configurado\n"
-                        msg += "/sethorario HH:MM HH:MM - Cambiar horario\n"
-                        msg += "/setdias 1,2,3,4,5 - Cambiar dias\n"
-                        msg += "/foto - Obtener captura actual"
-                        enviar_mensaje_telegram(msg)
-
+                    if text in comandos:
+                        comandos[text]()
                     elif text.startswith('/sethorario'):
-                        partes = text.split()
-                        if len(partes) == 3:
-                            try:
-                                # Validar formato
-                                datetime.strptime(partes[1], "%H:%M")
-                                datetime.strptime(partes[2], "%H:%M")
-                                HORARIO_INICIO = partes[1]
-                                HORARIO_FIN = partes[2]
-                                enviar_mensaje_telegram(
-                                    f"*Horario actualizado*\n\nInicio: {HORARIO_INICIO}\nFin: {HORARIO_FIN}")
-                            except ValueError:
-                                enviar_mensaje_telegram(
-                                    "Formato incorrecto. Usa: /sethorario HH:MM HH:MM\n\nEjemplo: /sethorario 08:00 22:00")
-                        else:
-                            enviar_mensaje_telegram(
-                                "Uso: /sethorario HH:MM HH:MM\n\nEjemplo: /sethorario 08:00 22:00\nPara horario nocturno: /sethorario 22:00 06:00")
-
+                        manejar_sethorario(text)
                     elif text.startswith('/setdias'):
-                        partes = text.split()
-                        if len(partes) == 2:
-                            try:
-                                dias = [int(d.strip()) for d in partes[1].split(",")]
-                                # Validar que son dias validos (1-7)
-                                if all(1 <= d <= 7 for d in dias):
-                                    DIAS_ACTIVOS_LIST = dias
-                                    nombres_dias = {1: "Lun", 2: "Mar", 3: "Mie", 4: "Jue", 5: "Vie", 6: "Sab",
-                                                    7: "Dom"}
-                                    dias_texto = ", ".join([nombres_dias[d] for d in sorted(dias)])
-                                    enviar_mensaje_telegram(f"*Dias actualizados*\n\nActivos: {dias_texto}")
-                                else:
-                                    enviar_mensaje_telegram(
-                                        "Los dias deben ser numeros del 1 al 7\n\n1=Lunes, 7=Domingo")
-                            except ValueError:
-                                enviar_mensaje_telegram(
-                                    "Formato incorrecto. Usa numeros separados por comas.\n\nEjemplo: /setdias 1,2,3,4,5")
-                        else:
-                            enviar_mensaje_telegram(
-                                "Uso: /setdias 1,2,3,4,5\n\n1=Lunes, 2=Martes, 3=Miercoles\n4=Jueves, 5=Viernes, 6=Sabado, 7=Domingo\n\nEjemplos:\n/setdias 1,2,3,4,5 (Lun-Vie)\n/setdias 6,7 (fines de semana)\n/setdias 1,2,3,4,5,6,7 (todos)")
+                        manejar_setdias(text)
 
             except requests.exceptions.Timeout:
                 continue
             except Exception as e:
                 print(f"Error bot Telegram: {e}")
-                import time
                 time.sleep(5)
 
     thread = threading.Thread(target=escuchar_comandos, daemon=True)
@@ -475,13 +505,7 @@ def enviar_foto_telegram(frame):
         img_bytes = io.BytesIO(img_encoded.tobytes())
         img_bytes.name = 'captura.jpg'
 
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
-        response = requests.post(url, data={
-            'chat_id': TELEGRAM_CHAT_ID,
-            'caption': f"📸 Captura: {datetime.now().strftime('%H:%M:%S')}"
-        }, files={
-            'photo': img_bytes
-        })
+        telegram_send_photo(img_bytes, f"📸 Captura: {datetime.now().strftime('%H:%M:%S')}")
     except Exception as e:
         print(f"Error enviando foto: {e}")
 
@@ -561,9 +585,9 @@ kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
 # =====================================================
 # PARÁMETROS AJUSTABLES
 # =====================================================
-AREA_MINIMA = 500
-conf_threshold = 0.25  # 75% sensibilidad
-NMS_THRESHOLD = 0.45
+AREA_MINIMA = 500 # Área mínima para considerar movimiento
+conf_threshold = 0.15  # 85% sensibilidad
+NMS_THRESHOLD = 0.65 # Umbral NMS (menor = menos cajas, mayor = más cajas)
 # Con GPU podemos procesar cada frame, con CPU cada 5
 YOLO_INTERVAL = 1 if USE_GPU else 5
 
@@ -674,8 +698,6 @@ ultimo_objetos = {}
 paused = False
 
 # Para medir FPS de inferencia
-import time
-
 inference_times = []
 
 while True:
@@ -755,10 +777,7 @@ while True:
         y_pos = 50
         if ultimo_objetos:
             for nombre, cantidad in ultimo_objetos.items():
-                for k, v in CLASES_DETECTAR.items():
-                    if v["nombre"] == nombre:
-                        color = v["color"]
-                        break
+                color = color_por_nombre(nombre)
                 texto = f"{nombre}: {cantidad}"
                 cv2.putText(frame, texto, (x_pos, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
                 x_pos += len(texto) * 12 + 20

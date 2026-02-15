@@ -2,6 +2,202 @@
 
 Sistema de detección de movimiento e identificación de objetos (personas, perros, gatos) usando YOLOv8 con soporte para GPU y alertas por Telegram/Email.
 
+## Descripción General
+
+Este sistema combina detección de movimiento tradicional (OpenCV BackgroundSubtractor) con inteligencia artificial (YOLOv8) para crear un sistema de vigilancia inteligente que puede:
+
+- **Detectar movimiento** en tiempo real usando algoritmos de sustracción de fondo
+- **Identificar objetos específicos** (personas, perros, gatos) usando YOLOv8 con ONNX Runtime
+- **Enviar alertas automáticas** por Telegram y/o Email cuando detecta personas
+- **Control remoto** mediante bot de Telegram para activar/desactivar alarma
+- **Horarios programables** para activar el sistema solo en ciertos momentos
+- **Optimizado para rendimiento** con soporte GPU automático (NVIDIA CUDA)
+
+## Cómo Funciona
+
+### Arquitectura del Sistema
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      FUENTE DE VIDEO                        │
+│           (Webcam / Archivo / Stream RTSP/HTTP)             │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│              DETECCIÓN DE MOVIMIENTO (OpenCV)               │
+│   • BackgroundSubtractorMOG2                                │
+│   • Filtrado morfológico                                     │
+│   • Análisis de contornos                                    │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+              ┌──────────────────┐
+              │ ¿Movimiento?     │
+              └────┬─────────┬───┘
+                   │ NO      │ SÍ
+                   │         ▼
+                   │    ┌─────────────────────────────────┐
+                   │    │   DETECCIÓN YOLOv8 (ONNX)       │
+                   │    │ • Inferencia cada N frames      │
+                   │    │ • GPU automática (CUDA)         │
+                   │    │ • Filtrado de clases            │
+                   │    │ • NMS (Non-Maximum Suppression) │
+                   │    └────────┬────────────────────────┘
+                   │             │
+                   │             ▼
+                   │    ┌──────────────────┐
+                   │    │ ¿Persona?        │
+                   │    └────┬─────────┬───┘
+                   │         │ NO      │ SÍ
+                   │         │         ▼
+                   │         │    ┌──────────────────────┐
+                   │         │    │ VERIFICAR HORARIO    │
+                   │         │    │ VERIFICAR COOLDOWN   │
+                   │         │    └────┬─────────────────┘
+                   │         │         │
+                   │         │         ▼
+                   │         │    ┌──────────────────────┐
+                   │         │    │ ENVIAR ALERTAS       │
+                   │         │    │ • Telegram (foto)    │
+                   │         │    │ • Email (adjunta)    │
+                   │         │    └──────────────────────┘
+                   │         │
+                   └─────────┴────────────────────────────────┐
+                                                              │
+                                                              ▼
+                                             ┌─────────────────────────────┐
+                                             │  VISUALIZACIÓN EN PANTALLA  │
+                                             │ • Bounding boxes            │
+                                             │ • Panel de información      │
+                                             │ • Estado de alarma          │
+                                             └─────────────────────────────┘
+```
+
+### Flujo de Procesamiento
+
+#### 1. **Captura de Video**
+```python
+# El sistema lee frames de diferentes fuentes:
+URL = 0                    # Webcam
+URL = "video.mp4"          # Archivo local
+URL = "https://..."        # Stream HTTP/RTSP
+```
+
+#### 2. **Detección de Movimiento (Optimización)**
+- Usa `BackgroundSubtractorMOG2` para crear una máscara de píxeles en movimiento
+- Aplica operaciones morfológicas (apertura, dilatación) para reducir ruido
+- Calcula contornos y filtra por área mínima
+- **Propósito**: Evitar ejecutar YOLOv8 en frames estáticos (ahorro de CPU/GPU)
+
+```python
+# Solo si hay movimiento significativo → ejecutar YOLOv8
+if movimiento_detectado and frame_count % YOLO_INTERVAL == 0:
+    detectar_yolov8(frame)
+```
+
+#### 3. **Detección con YOLOv8**
+- **Preprocesamiento**: 
+  - Redimensiona frame a 640x640 (letterbox con padding)
+  - Normaliza valores a 0-1
+  - Convierte formato HWC → CHW (Height, Width, Channels)
+  
+- **Inferencia ONNX**:
+  - Ejecuta modelo YOLOv8n.onnx usando ONNX Runtime
+  - Utiliza GPU automáticamente si está disponible (CUDA)
+  - Salida: tensor [1, 84, 8400] con 8400 detecciones posibles
+
+- **Postprocesamiento**:
+  - Filtra detecciones por confianza (threshold ajustable)
+  - Aplica NMS (Non-Maximum Suppression) para eliminar duplicados
+  - Solo conserva clases configuradas (person, dog, cat)
+
+```python
+# Detecciones filtradas
+CLASES_DETECTAR = {
+    "person": {"nombre": "PERSONA", "color": (0, 255, 0)},
+    "dog": {"nombre": "PERRO", "color": (0, 165, 255)},
+    "cat": {"nombre": "GATO", "color": (255, 0, 255)}
+}
+```
+
+#### 4. **Sistema de Alertas**
+- **Verificación de condiciones**:
+  - ¿Se detectó una PERSONA?
+  - ¿La alarma está activa? (horario + día + estado forzado)
+  - ¿Ha pasado el tiempo de cooldown? (evita spam)
+
+- **Envío multihilo**:
+  - Captura el frame actual
+  - Lanza thread separado para no bloquear el video
+  - Envía por Telegram (foto con caption)
+  - Envía por Email (foto adjunta en MIME)
+
+```python
+# Cooldown de 60 segundos entre alertas
+if (ahora - ultima_alerta).total_seconds() >= COOLDOWN_ALERTAS:
+    enviar_alertas(frame, objetos_detectados)
+```
+
+#### 5. **Bot de Telegram (Control Remoto)**
+- Thread daemon escuchando comandos 24/7
+- Usa long polling (`getUpdates` con timeout=30s)
+- Comandos procesados:
+  - `/activar` → Fuerza alarma ON
+  - `/desactivar` → Fuerza alarma OFF
+  - `/auto` → Usa horario programado
+  - `/foto` → Captura instantánea
+  - `/sethorario HH:MM HH:MM` → Cambia horario
+  - `/setdias 1,2,3,4,5` → Cambia días activos
+
+```python
+# El bot modifica variables globales
+ALARMA_FORZADA = True   # Siempre activa
+ALARMA_FORZADA = False  # Siempre inactiva
+ALARMA_FORZADA = None   # Usar horario
+```
+
+### Características Técnicas
+
+#### Optimizaciones de Rendimiento
+
+1. **Procesamiento condicional**:
+   - YOLOv8 solo se ejecuta cuando hay movimiento
+   - Intervalo ajustable (`YOLO_INTERVAL`): GPU=1 frame, CPU=5 frames
+
+2. **GPU automática**:
+   - Detecta NVIDIA CUDA automáticamente
+   - Fallback a CPU si no hay GPU
+   - ONNX Runtime optimizado para inferencia
+
+3. **Streaming optimizado**:
+   - Buffer de 1 frame para streams en vivo
+   - Descarta frames antiguos (`grab()` x2)
+   - Reduce latencia en streams RTSP/HTTP
+
+4. **Multithreading**:
+   - Alertas enviadas en threads separados
+   - Bot Telegram en thread daemon
+   - No bloquea el procesamiento de video
+
+#### Sistema de Horarios
+
+```python
+# Ejemplo: Alertas solo de lunes a viernes, 8:00 a 22:00
+HORARIO_INICIO = "08:00"
+HORARIO_FIN = "22:00"
+DIAS_ACTIVOS = "1,2,3,4,5"  # 1=Lun, 7=Dom
+
+# Horario nocturno (ej: 22:00 a 06:00)
+HORARIO_INICIO = "22:00"
+HORARIO_FIN = "06:00"
+```
+
+**Lógica de horario**:
+- Verifica día de la semana (`isoweekday()`)
+- Maneja horarios nocturnos (cruzan medianoche)
+- Modo forzado anula horario programado
+
 ## Características
 
 - Detección de movimiento en tiempo real
@@ -118,23 +314,24 @@ GMAIL_PASSWORD="xxxx xxxx xxxx xxxx"
 
 ```
 proyecto/
-├── detector_movimiento_yolo.py  # Programa principal
-├── obtener_chat_id.py           # Utilidad para Telegram
-├── instalar.sh                  # Instalador Linux/macOS
-├── instalar.bat                 # Instalador Windows
-├── requirements.txt             # Dependencias
-├── .env.ejemplo                 # Plantilla de configuración
-├── .env                         # Tu configuración (crear)
-└── yolo_model/                  # (creado automáticamente)
-    ├── yolov8n.onnx
-    └── coco.names
+├── main.py                          # Programa principal
+├── chat_id.py                       # Utilidad para obtener Chat ID Telegram
+├── install.sh                       # Instalador Linux/macOS
+├── install.bat                      # Instalador Windows
+├── requirements.txt                 # Dependencias Python
+├── env.example                      # Plantilla de configuración
+├── .env                             # Tu configuración (crear manualmente)
+├── README.md                        # Este archivo
+└── yolo_model/                      # Modelo YOLOv8 (creado automáticamente)
+    ├── yolov8n.onnx                 # Modelo convertido a ONNX
+    └── coco.names                   # Nombres de las 80 clases COCO
 ```
 
 ## Uso
 
 ### Configurar fuente de video
 
-Edita `detector_movimiento_yolo.py` y cambia la variable `URL`:
+Edita `main.py` y cambia la variable `URL`:
 
 ```python
 # Archivo local:
@@ -150,7 +347,7 @@ URL = 0
 ### Ejecutar
 
 ```bash
-python detector_movimiento_yolo.py
+python main.py
 ```
 
 ## Controles de Teclado
@@ -218,6 +415,10 @@ pip install onnxruntime        # Sin GPU
 ```
 
 **Video entrecortado**: Aumenta el intervalo de YOLO con la tecla `E`.
+
+**Bot de Telegram no responde**: Verifica que el `TELEGRAM_TOKEN` y `TELEGRAM_CHAT_ID` sean correctos en `.env`.
+
+**Alertas no llegan**: Verifica el horario configurado con `/horario` en Telegram.
 
 ## Rendimiento
 

@@ -1,3 +1,155 @@
+# Motion Detector + YOLOv8
+
+Motion detection and object identification (person, dog, cat) using YOLOv8 with GPU support and Telegram/Email alerts.
+
+## English
+
+### Overview
+This system combines classic motion detection (OpenCV BackgroundSubtractor) with YOLOv8 inference to provide:
+- Real-time motion detection
+- Object identification (person, dog, cat)
+- Automatic alerts via Telegram and/or Email
+- Telegram bot for remote control
+- Schedules to activate alerts only at specific times
+- Automatic GPU acceleration (CUDA) when available
+
+### How it works
+
+#### System Architecture
+```
+┌─────────────────────────────────────────────────────────────┐
+│                         VIDEO SOURCE                         │
+│           (Webcam / File / RTSP/HTTP Stream)                 │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│               MOTION DETECTION (OpenCV)                      │
+│   • BackgroundSubtractorMOG2                                 │
+│   • Morphological filtering                                  │
+│   • Contour analysis                                         │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+              ┌──────────────────┐
+              │ Motion?          │
+              └────┬─────────┬───┘
+                   │ NO      │ YES
+                   │         ▼
+                   │    ┌─────────────────────────────────┐
+                   │    │    YOLOv8 DETECTION (ONNX)       │
+                   │    │ • Inference every N frames       │
+                   │    │ • Auto GPU (CUDA)                │
+                   │    │ • Class filtering                │
+                   │    │ • NMS                            │
+                   │    └────────┬────────────────────────┘
+                   │             │
+                   │             ▼
+                   │    ┌──────────────────┐
+                   │    │ Person detected? │
+                   │    └────┬─────────┬───┘
+                   │         │ NO      │ YES
+                   │         │         ▼
+                   │         │    ┌──────────────────────┐
+                   │         │    │ CHECK SCHEDULE       │
+                   │         │    │ CHECK COOLDOWN       │
+                   │         │    └────┬─────────────────┘
+                   │         │         │
+                   │         │         ▼
+                   │         │    ┌──────────────────────┐
+                   │         │    │ SEND ALERTS          │
+                   │         │    │ • Telegram (photo)   │
+                   │         │    │ • Email (attachment) │
+                   │         │    └──────────────────────┘
+                   │         │
+                   └─────────┴────────────────────────────────┐
+                                                              │
+                                                              ▼
+                                             ┌─────────────────────────────┐
+                                             │        LIVE DISPLAY          │
+                                             │ • Bounding boxes             │
+                                             │ • Info panel                 │
+                                             │ • Alarm state                │
+                                             └─────────────────────────────┘
+```
+
+#### Processing Flow (summary)
+1. Capture frames from webcam/file/stream.  
+2. Run motion detection to avoid unnecessary YOLO inference.  
+3. Run YOLOv8 inference every N frames.  
+4. If a person is detected and alarm is active → send alerts.  
+5. Telegram bot allows remote control (on/off/auto, schedule, snapshot).
+
+### Features
+- Motion detection + YOLOv8 object detection
+- Automatic GPU acceleration (CUDA)
+- Telegram alerts (photo + caption)
+- Email alerts (photo attachment)
+- Schedules with day/time filtering
+- Remote control via Telegram bot
+- Real-time display and performance info
+
+### Requirements
+- Python 3.8+
+- Windows / Linux / macOS
+- Optional NVIDIA GPU for CUDA acceleration
+
+### Installation
+**Linux/macOS**
+```bash
+chmod +x install.sh
+./install.sh
+```
+
+**Windows**
+```bat
+install.bat
+```
+
+### Telegram Setup
+1. Create a bot with `@BotFather`.
+2. Put the token in `.env`.
+3. Send `/start` to the bot.
+4. Run:
+```bash
+python chat_id.py
+```
+
+### Bot Commands
+| Command | Description |
+|---------|-------------|
+| `/activar` | Force alarm ON |
+| `/desactivar` | Force alarm OFF |
+| `/auto` | Use schedule |
+| `/estado` | Show status |
+| `/horario` | Show schedule |
+| `/sethorario HH:MM HH:MM` | Set schedule |
+| `/setdias 1,2,3,4,5` | Set active days |
+| `/foto` | Snapshot |
+| `/help` | Help |
+
+### Schedule Config (.env)
+```env
+HORARIO_INICIO="08:00"
+HORARIO_FIN="22:00"
+DIAS_ACTIVOS="1,2,3,4,5,6,7"
+```
+
+### Email Config (.env)
+```env
+GMAIL_CUENTA="your_email@gmail.com"
+GMAIL_PASSWORD="app_password"
+```
+
+### License
+GNU GPLv3 (see LICENSE)
+
+### Credits
+- Ultralytics YOLOv8
+- ONNX Runtime
+- OpenCV
+
+## Español
 # Detector de Movimiento + YOLOv8
 
 Sistema de detección de movimiento e identificación de objetos (personas, perros, gatos) usando YOLOv8 con soporte para GPU y alertas por Telegram/Email.
